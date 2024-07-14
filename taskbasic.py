@@ -27,12 +27,12 @@ def receiveSignal():
     while uart.any():
         Signal = uart.readchar()
         if Signal == 114:
-            if count < 5:
+            if count < 4:
                 redPanList.append(redx)
                 redTiltList.append(redy)
                 count = count + 1
                 print(":)" + count)
-            if count > 5:
+            if count > 4:
                 print(":(")
         if Signal == 514:
             traceRectangles(0)
@@ -63,10 +63,18 @@ def limmitAngle(Angle):
     return limmited
 
 def traceRectangles(state):
-    for i in range(0, 5):
-        if (state == i):
-            tiltAngle(redPanList[i], redTiltList[i])
-            time.sleep(0.5)
+    if state <= 3:
+        for i in range(0, 3):
+            if (state == i):
+                servoControl(redPanList[i], redTiltList[i])
+                time.sleep(0.7)
+        state = 4
+    if state == 4:
+        servoControl(redPanList[0], redTiltList[0])
+        state = 5
+    if state == 5:
+        pan_servo.angle(0)
+        tilt_servo.angle(0)
 
 def find_max(blobs):
     max_size = 0
