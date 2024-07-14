@@ -8,23 +8,23 @@ tilt_servo = Servo(2)
 # pan_servo.calibration(500,2500,500)
 # tilt_servo.calibration(500,2500,500)
 
-grn_threshold = (91, 100, -36, 1, -3, 30)
+grn_threshold = (94, 100, -6, 21, -6, 8)
+red_threshold = (65, 99, 8, 41, -1, 38)
 
-pan_pid = PID(p=0.037, d=0.015, i=0, imax=90) #脱机运行或者禁用图像传输，使用这个PID
-tilt_pid = PID(p=0.035, d=0.013, i=0, imax=90) #脱机运行或者禁用图像传输，使用这个PID
-# pan_pid = PID(p=0.1, i=0, imax=90)#在线调试使用这个PID
-# tilt_pid = PID(p=0.1, i=0, imax=90)#在线调试使用这个PID
+pan_pid = PID(p=0.042, d=0.001, i=0.03, imax=90) # 脱机运行或者禁用图像传输，使用这个PID
+tilt_pid = PID(p=0.042, d=0.001, i=0.03, imax=90) # 脱机运行或者禁用图像传输，使用这个PID
+# pan_pid = PID(p=0.1, i=0, imax=90) # 在线调试使用这个PID
+# tilt_pid = PID(p=0.1, i=0, imax=90) # 在线调试使用这个PID
 
-sensor.reset() # Initialize the camera sensor.
+sensor.reset() # 初始化摄像头传感器
 sensor.set_contrast(3)
 sensor.set_gainceiling(16)
-sensor.set_pixformat(sensor.RGB565) # use RGB565.
-sensor.set_framesize(sensor.QVGA) # use QQVGA for speed.
+sensor.set_pixformat(sensor.RGB565) # 使用RGB565
+sensor.set_framesize(sensor.QVGA) # 使用QVGA分辨率
 sensor.set_vflip(False)
-sensor.skip_frames(10) # Let new settings take affect.
-sensor.set_auto_whitebal(False) # turn this off.
-clock = time.clock() # Tracks FPS.
-# face_cascade = image.HaarCascade("frontalface", stages=25)
+sensor.skip_frames(10) # 让新设置生效
+sensor.set_auto_whitebal(False) # 关闭自动白平衡
+clock = time.clock() # 追踪帧率
 
 def find_max(blobs):
     max_size = 0
@@ -46,23 +46,32 @@ def limmitAngle(panAngle, tiltAngle):
         tiltAngle = -15
     return panAngle, tiltAngle
 
+rx, ry = None, None  # 初始化红色激光点的坐标
+
 while True:
-    clock.tick() # Track elapsed milliseconds between snapshots().
-    img = sensor.snapshot() # Take a picture and return the image.
+    clock.tick() # 记录快照之间的时间
+    img = sensor.snapshot() # 拍照并返回图像
+
+    redBlobs = img.find_blobs([red_threshold])
+    if redBlobs:
+        redBlob = find_max(redBlobs)
+        if redBlob:
+            rx = int(redBlob[0] + redBlob[2] / 2)
+            ry = int(redBlob[1] + redBlob[3] / 2)
 
     blobs = img.find_blobs([grn_threshold])
-    if blobs:
+    if blobs and rx is not None and ry is not None:
         blob = find_max(blobs)
         if blob:
             cx = int(blob[0] + blob[2] / 2)
             cy = int(blob[1] + blob[3] / 2)
-            pan_error = cx - img.width() / 2
-            tilt_error = cy - img.height() / 2 + 5
+            pan_error = cx - rx
+            tilt_error = cy - ry
 
             print("pan_error: ", pan_error)
 
-            img.draw_rectangle(blob.rect()) # rect
-            img.draw_cross(cx, cy) # cx, cy
+            img.draw_rectangle(blob.rect()) # 在图像上画出矩形
+            img.draw_cross(cx, cy) # 在图像上画出中心点
 
             pan_output = pan_pid.get_pid(pan_error, 1)
             tilt_output = tilt_pid.get_pid(tilt_error, 1)
