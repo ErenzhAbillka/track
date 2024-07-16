@@ -6,27 +6,20 @@ uart = UART(1, 9600)  # Define UART1
 uart.init(9600, bits=8, parity=None, stop=1)  # Initialize with given parameters
 
 i = 0
-
-
-def receiveSignal():
-    global uart
-    while uart.any():
-        Signal = uart.readchar()
-        if Signal == 6:
-            return 9
-    return None
-
+j = 0
 
 pan_servo = Servo(1)
 tilt_servo = Servo(2)
 
 red_threshold = (61, 100, 8, 22, -2, 12)
 
-redPanList = [150, 150, 100, 100]
-redTiltList = [60, 90, 90, 60]
+redPanList = []
+redTiltList = []
 
-pan_pid = PID(p=0.1, d=0.02, i=0.3, imax=90)  # Adjust PID parameters
-tilt_pid = PID(p=0.1, d=0.02, i=0.3, imax=90)  # Adjust PID parameters
+pan_pid = PID(p=0.042, d=0.001, i=0.03, imax=90)  # Adjust PID parameters
+tilt_pid = PID(p=0.042, d=0.001, i=0.03, imax=90)  # Adjust PID parameters
+
+rx, ry = None, None  # Initialize coordinates of the red laser point
 
 sensor.reset()  # Initialize the camera sensor
 sensor.set_contrast(3)
@@ -37,6 +30,20 @@ sensor.set_vflip(False)
 sensor.skip_frames(10)  # Let the new settings take effect
 sensor.set_auto_whitebal(False)  # Turn off auto white balance
 clock = time.clock()  # Track the frame rate
+
+
+def record(rx, ry):
+    global j
+    if j < 4:
+        print("Record " + str(j))
+        redPanList.append(rx)
+        redTiltList.append(ry)  # Append to redTiltList here if necessary
+        j += 1
+    elif j == 4:
+        print("The coordinates of the record are:\n")
+        for i in range(4):  # Iterate over the range of recorded points
+            if i < len(redPanList) and i < len(redTiltList):
+                print("redPanList: {}, redTiltList: {}".format(redPanList[i], redTiltList[i]))
 
 
 def find_max(blobs):
@@ -61,12 +68,9 @@ def limit_angle(pan_angle, tilt_angle):
     return pan_angle, tilt_angle
 
 
-rx, ry = None, None  # Initialize coordinates of the red laser point
-
-
 def update_laser_position():
     global rx, ry
-    img = sensor.snapshot().lens_corr(strength = 1.8, zoom = 1.0)
+    img = sensor.snapshot().lens_corr(strength=1.8, zoom=1.0)
     red_blobs = img.find_blobs([red_threshold])
     if red_blobs:
         red_blob = find_max(red_blobs)
@@ -129,9 +133,15 @@ def servo_pid_control(target_x, target_y, target_index):
 
     return True
 
+
 while True:
     clock.tick()  # Track time between snapshots
-    img = sensor.snapshot().lens_corr(strength = 1.8, zoom = 1.0)  # Capture an image
+    img = sensor.snapshot().lens_corr(strength=1.8, zoom=1.0)  # Capture an image
+    uart.any()
+    Signal = uart.readchar()
+
+    if Signal == 6:
+        record(rx, ry)
 
     red_blobs = img.find_blobs([red_threshold])
     if red_blobs:
@@ -139,23 +149,31 @@ while True:
         if red_blob:
             rx = int(red_blob.cx())
             ry = int(red_blob.cy())
-            print("Detected red laser at: ", rx, ry)
+            #            print("Detected red laser at: ", rx, ry)
 
             # Sequentially align with the preset red laser point positions
-            if receiveSignal() == 9:
-#                while i < len(redPanList):
+            if Signal == 9:
+                #                while i < len(redPanList):
                 for i in range(len(redPanList)):
-#                 if i < len(redPanList):
+                    #                 if i < len(redPanList):
                     target_x = redPanList[i]
                     target_y = redTiltList[i]
                     if not servo_pid_control(target_x, target_y, i):
                         break  # Exit the main loop if timeout occurs
                     print("loop {} is over".format(i))
                     # time.sleep(100)  # Pause for 1 second to ensure alignment
+
+                # back to orri
+                target_x = redPanList[0]
+                target_y = redTiltList[0]
+                if not servo_pid_control(target_x, target_y, 0):
+                    break  # Exit the main loop if timeout occurs
+                print("Mission accomplished")
+
                 # else:
                 #     print("Completed one full cycle.")
                 #     i = 0  # Reset the cycle if needed
                 #     # break  # Uncomment this if you want to stop after one cycle
-    else:
-        print("No red blobs detected.")
+#    else:
+#        print("No red blobs detected.")
 
