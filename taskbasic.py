@@ -11,13 +11,16 @@ j = 0
 pan_servo = Servo(1)
 tilt_servo = Servo(2)
 
-red_threshold = (61, 100, 8, 22, -2, 12)
+red_thresholds = [(61, 100, 8, 22, -2, 12),
+                  (0, 100, 12, 34, -28, 36)]
 
 redPanList = []
 redTiltList = []
+rectanglePanList = []
+rectangleTiltList = []
 
-pan_pid = PID(p=0.042, d=0.001, i=0.03, imax=90)  # Adjust PID parameters
-tilt_pid = PID(p=0.042, d=0.001, i=0.03, imax=90)  # Adjust PID parameters
+pan_pid = PID(p=0.015, d=0.007, i=0.03, imax=90)  # Adjust PID parameters
+tilt_pid = PID(p=0.015, d=0.007, i=0.03, imax=90)  # Adjust PID parameters
 
 rx, ry = None, None  # Initialize coordinates of the red laser point
 
@@ -46,6 +49,36 @@ def record(rx, ry):
                 print("redPanList: {}, redTiltList: {}".format(redPanList[i], redTiltList[i]))
 
 
+def check_rectangle():
+    global img, rectanglePanList, rectangleTiltList
+    for r in img.find_rects(threshold=10000):
+        # 绘制矩形轮廓
+        img.draw_rectangle(r.rect(), color=(255, 0, 0))
+
+        # 获取并绘制矩形角点
+        corners = r.corners()
+        corners = sorted(corners, key=lambda c: (c[1], c[0]))  # 按 y 坐标排序，如果 y 坐标相同按 x 坐标排序
+
+        # 左上角和右上角
+        if corners[0][0] > corners[1][0]:
+            corners[0], corners[1] = corners[1], corners[0]
+
+        # 左下角和右下角
+        if corners[2][0] > corners[3][0]:
+            corners[2], corners[3] = corners[3], corners[2]
+
+        #       labels = ['zx1', 'zy2', 'zx2', 'zy1']  # 顺时针顺序：左上、右上、右下、左下
+        #       for i, corner in enumerate(corners):
+        #           img.draw_circle(corner[0], corner[1], 5, color=(0, 255, 0))
+        #           print(f"{labels[i]}: ({corner[0]}, {corner[1]})")
+
+        for g in range(4):
+            rectanglePanList.append(corners[g][0])
+        for h in range(4):
+            rectangleTiltList.append(corners[h][1])
+            print("rectanglePanList: {}, rectangleTiltList: {}".format(rectanglePanList[h], rectangleTiltList[h]))
+
+
 def find_max(blobs):
     max_size = 0
     max_blob = None
@@ -71,7 +104,7 @@ def limit_angle(pan_angle, tilt_angle):
 def update_laser_position():
     global rx, ry
     img = sensor.snapshot().lens_corr(strength=1.8, zoom=1.0)
-    red_blobs = img.find_blobs([red_threshold])
+    red_blobs = img.find_blobs(red_thresholds)
     if red_blobs:
         red_blob = find_max(red_blobs)
         if red_blob:
@@ -143,29 +176,42 @@ while True:
     if Signal == 6:
         record(rx, ry)
 
-    red_blobs = img.find_blobs([red_threshold])
+    if Signal == 8:
+        check_rectangle()
+
+    red_blobs = img.find_blobs(red_thresholds)
     if red_blobs:
         red_blob = find_max(red_blobs)
         if red_blob:
             rx = int(red_blob.cx())
             ry = int(red_blob.cy())
-            #            print("Detected red laser at: ", rx, ry)
+            # print("Detected red laser at: ", rx, ry)
 
             # Sequentially align with the preset red laser point positions
-            if Signal == 9:
-                #                while i < len(redPanList):
+            if Signal == 7:
                 for i in range(len(redPanList)):
-                    #                 if i < len(redPanList):
                     target_x = redPanList[i]
                     target_y = redTiltList[i]
                     if not servo_pid_control(target_x, target_y, i):
                         break  # Exit the main loop if timeout occurs
                     print("loop {} is over".format(i))
-                    # time.sleep(100)  # Pause for 1 second to ensure alignment
-
                 # back to orri
                 target_x = redPanList[0]
                 target_y = redTiltList[0]
+                if not servo_pid_control(target_x, target_y, 0):
+                    break  # Exit the main loop if timeout occurs
+                print("Mission accomplished")
+
+            if Signal == 9:
+                for i in range(len(rectanglePanList)):
+                    target_x = rectanglePanList[i]
+                    target_y = rectangleTiltList[i]
+                    if not servo_pid_control(target_x, target_y, i):
+                        break  # Exit the main loop if timeout occurs
+                    print("loop {} is over".format(i))
+                # back to orri
+                target_x = rectanglePanList[0]
+                target_y = rectangleTiltList[0]
                 if not servo_pid_control(target_x, target_y, 0):
                     break  # Exit the main loop if timeout occurs
                 print("Mission accomplished")
