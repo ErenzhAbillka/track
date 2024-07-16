@@ -2,47 +2,41 @@ import sensor, image, time
 from pid import PID
 from pyb import Servo, UART
 
-pan_servo = Servo(1)
-tilt_servo = Servo(2)
+uart = UART(1, 9600)  # Define UART1
+uart.init(9600, bits=8, parity=None, stop=1)  # Initialize with given parameters
 
-uart = UART(1, 9600)  # 定义串口3变量
-uart.init(9600, bits=8, parity=None, stop=1)  # init with given parameters
-
-red_threshold = (65, 99, 8, 41, -1, 38)
-redPanList = []
-redTiltList = []
-count = 0
-
-pan_pid = PID(p=0.042, d=0.001, i=0.03, imax=90)  # 脱机运行或者禁用图像传输，使用这个PID
-tilt_pid = PID(p=0.042, d=0.001, i=0.03, imax=90)  # 脱机运行或者禁用图像传输，使用这个PID
-# pan_pid = PID(p=0.1, i=0, imax=90) # 在线调试使用这个PID
-# tilt_pid = PID(p=0.1, i=0, imax=90) # 在线调试使用这个PID
-
-sensor.reset()  # 初始化摄像头传感器
-sensor.set_contrast(3)
-sensor.set_gainceiling(16)
-sensor.set_pixformat(sensor.RGB565)  # 使用RGB565
-sensor.set_framesize(sensor.QVGA)  # 使用QVGA分辨率
-sensor.set_vflip(False)
-sensor.skip_frames(10)  # 让新设置生效
-sensor.set_auto_whitebal(False)  # 关闭自动白平衡
-clock = time.clock()  # 追踪帧率
+i = 0
 
 
 def receiveSignal():
-    global uart, redPanList, redTiltList, count
+    global uart
     while uart.any():
         Signal = uart.readchar()
         if Signal == 6:
-            if count < 4:
-                redPanList.append(rx)
-                redTiltList.append(ry)
-                count += 1
-                if count == 4:
-                    for i in range(4):
-                        print(redPanList[i], redTiltList[i])
-        if Signal == 7:
-            servoPIDControl()
+            return 9
+    return None
+
+
+pan_servo = Servo(1)
+tilt_servo = Servo(2)
+
+red_threshold = (61, 100, 8, 22, -2, 12)
+
+redPanList = [150, 150, 100, 100]
+redTiltList = [60, 90, 90, 60]
+
+pan_pid = PID(p=0.1, d=0.02, i=0.3, imax=90)  # Adjust PID parameters
+tilt_pid = PID(p=0.1, d=0.02, i=0.3, imax=90)  # Adjust PID parameters
+
+sensor.reset()  # Initialize the camera sensor
+sensor.set_contrast(3)
+sensor.set_gainceiling(16)
+sensor.set_pixformat(sensor.RGB565)  # Use RGB565
+sensor.set_framesize(sensor.QVGA)  # Use QVGA resolution
+sensor.set_vflip(False)
+sensor.skip_frames(10)  # Let the new settings take effect
+sensor.set_auto_whitebal(False)  # Turn off auto white balance
+clock = time.clock()  # Track the frame rate
 
 
 def find_max(blobs):
@@ -55,55 +49,113 @@ def find_max(blobs):
     return max_blob
 
 
-def limmitAngle(panAngle, tiltAngle):
-    if panAngle > 15:
-        panAngle = 15
-    if panAngle < -15:
-        panAngle = -15
-    if tiltAngle > 15:
-        tiltAngle = 15
-    if tiltAngle < -15:
-        tiltAngle = -15
-    return panAngle, tiltAngle
+def limit_angle(pan_angle, tilt_angle):
+    if pan_angle > 15:
+        pan_angle = 15
+    if pan_angle < -15:
+        pan_angle = -15
+    if tilt_angle > 15:
+        tilt_angle = 15
+    if tilt_angle < -15:
+        tilt_angle = -15
+    return pan_angle, tilt_angle
 
 
-rx, ry = None, None  # 初始化红色激光点的坐标
+rx, ry = None, None  # Initialize coordinates of the red laser point
 
 
-def servoPIDControl():
-    for i in range(4):
-        cx = redPanList[i]
-        cy = redTiltList[i]
-        pan_error = cx - rx
-        tilt_error = cy - ry
+def update_laser_position():
+    global rx, ry
+    img = sensor.snapshot().lens_corr(strength = 1.8, zoom = 1.0)
+    red_blobs = img.find_blobs([red_threshold])
+    if red_blobs:
+        red_blob = find_max(red_blobs)
+        if red_blob:
+            rx = int(red_blob.cx())
+            ry = int(red_blob.cy())
+            print("Updated red laser position: ", rx, ry)
+            return True
+    print("No red blobs detected.")
+    return False
+
+
+def servo_pid_control(target_x, target_y, target_index):
+    global rx, ry
+    start_time = time.ticks_ms()  # 记录开始时间
+    print("Moving to target:", target_index)
+    uart.write("Moving to target: {}\n".format(target_index))
+
+    while True:
+        if not update_laser_position():
+            if time.ticks_diff(time.ticks_ms(), start_time) > 3000:
+                print("Failed to reach the target within 3 seconds.")
+                uart.write("Failed to reach the target within 3 seconds.\n")
+                return False
+            continue
+
+        pan_error = target_x - rx
+        tilt_error = target_y - ry
 
         print("pan_error: ", pan_error)
+        print("tilt_error: ", tilt_error)
 
-        # Dead Zone
-        if abs(pan_error) > 0.005:
-            pan_output = pan_pid.get_pid(pan_error, 1)
-            tilt_output = tilt_pid.get_pid(tilt_error, 1)
-            print("pan_output", pan_output)
+        # 死区
+        if abs(pan_error) <= 2 and abs(tilt_error) <= 2:
+            print("Reached within deadzone.")
+            uart.write("Reached within deadzone.\n")
+            return True  # 当达到死区内时，跳出循环并返回True
 
-            panAngle = int(pan_servo.angle() - pan_output)
-            tiltAngle = int(tilt_servo.angle() + tilt_output)
+        pan_output = pan_pid.get_pid(pan_error, 1)
+        tilt_output = tilt_pid.get_pid(tilt_error, 1)
+        print("pan_output", pan_output)
+        print("tilt_output", tilt_output)
 
-            # 限幅
-            x_angle, y_angle = limmitAngle(panAngle, tiltAngle)
-            pan_servo.angle(x_angle)
-            tilt_servo.angle(y_angle)
-        time.sleep(0.5)
+        pan_angle = int(pan_servo.angle() - pan_output)
+        tilt_angle = int(tilt_servo.angle() + tilt_output)
 
+        # 限制角度
+        x_angle, y_angle = limit_angle(pan_angle, tilt_angle)
+        pan_servo.angle(x_angle)
+        tilt_servo.angle(y_angle)
+        time.sleep_ms(100)
+        print("Servo angles: pan = {}, tilt = {}".format(x_angle, y_angle))
+        print("\n ")
+
+        # 检查超时 (3秒)
+        if time.ticks_diff(time.ticks_ms(), start_time) > 3000:
+            print("Failed to reach the target within 3 seconds.")
+            uart.write("Failed to reach the target within 3 seconds.\n")
+            return False
+
+    return True
 
 while True:
-    clock.tick()  # 记录快照之间的时间
-    img = sensor.snapshot()  # 拍照并返回图像
+    clock.tick()  # Track time between snapshots
+    img = sensor.snapshot().lens_corr(strength = 1.8, zoom = 1.0)  # Capture an image
 
-    redBlobs = img.find_blobs([red_threshold])
-    if redBlobs:
-        redBlob = find_max(redBlobs)
-        if redBlob:
-            rx = int(redBlob[0] + redBlob[2] / 2)
-            ry = int(redBlob[1] + redBlob[3] / 2)
+    red_blobs = img.find_blobs([red_threshold])
+    if red_blobs:
+        red_blob = find_max(red_blobs)
+        if red_blob:
+            rx = int(red_blob.cx())
+            ry = int(red_blob.cy())
+            print("Detected red laser at: ", rx, ry)
 
-    receiveSignal()
+            # Sequentially align with the preset red laser point positions
+            if receiveSignal() == 9:
+#                while i < len(redPanList):
+                for i in range(len(redPanList)):
+#                 if i < len(redPanList):
+                    target_x = redPanList[i]
+                    target_y = redTiltList[i]
+                    if not servo_pid_control(target_x, target_y, i):
+                        break  # Exit the main loop if timeout occurs
+                    print("loop {} is over".format(i))
+                    # time.sleep(100)  # Pause for 1 second to ensure alignment
+                # else:
+                #     print("Completed one full cycle.")
+                #     i = 0  # Reset the cycle if needed
+                #     # break  # Uncomment this if you want to stop after one cycle
+    else:
+        print("No red blobs detected.")
+
