@@ -19,8 +19,8 @@ redTiltList = []
 rectanglePanList = []
 rectangleTiltList = []
 
-pan_pid = PID(p=0.015, d=0.007, i=0.03, imax=90)  # Adjust PID parameters
-tilt_pid = PID(p=0.015, d=0.007, i=0.03, imax=90)  # Adjust PID parameters
+pan_pid = PID(p=0.028, d=0.012, i=0.2, imax=90)  # Adjust PID parameters
+tilt_pid = PID(p=0.028, d=0.012, i=0.2, imax=90)  # Adjust PID parameters
 
 rx, ry = None, None  # Initialize coordinates of the red laser point
 
@@ -44,12 +44,17 @@ def record(rx, ry):
         redPanList.append(rx)
         redTiltList.append(ry)  # Append to redTiltList here if necessary
         j += 1
-    elif j == 3:
-        print("The coordinates of the record are:\n")
+    elif j == 4:
+        print("The coordinates of the record are:")
         for i in range(4):  # Iterate over the range of recorded points
             if i < len(redPanList) and i < len(redTiltList):
                 print("redPanList: {}, redTiltList: {}".format(redPanList[i], redTiltList[i]))
-    elif j >= 4:
+        # theta_values = [0x2C, 4, redPanList[0], redTiltList[0], redPanList[1], redTiltList[1],
+        #                          redPanList[2], redTiltList[2], redPanList[3], redTiltList[3],0x5B]
+        # data = bytes(theta_values)
+        # uart.write(data)
+        j += 1
+    elif j >= 5:
         print(":(")
 
 
@@ -76,6 +81,10 @@ def check_rectangle():
         for h in range(4):
             rectangleTiltList.append(corners[h][1])
             print("rectanglePanList: {}, rectangleTiltList: {}".format(rectanglePanList[h], rectangleTiltList[h]))
+        # theta_values = [0x2C, 4, rectanglePanList[0], rectangleTiltList[0], rectanglePanList[1], rectangleTiltList[1],
+        #                          rectanglePanList[2], rectangleTiltList[2], rectanglePanList[3], rectangleTiltList[3],0x5B]
+        # data = bytes(theta_values)
+        # uart.write(data)
 
 
 def find_max(blobs):
@@ -125,7 +134,7 @@ def servo_pid_control(target_x, target_y, target_index):
         if not update_laser_position():
             if time.ticks_diff(time.ticks_ms(), start_time) > 3000:
                 print("Failed to reach the target within 3 seconds.")
-                uart.write("Failed to reach the target within 3 seconds.\n")
+                # uart.write(14)
                 return False
             continue
 
@@ -136,9 +145,9 @@ def servo_pid_control(target_x, target_y, target_index):
         print("tilt_error: ", tilt_error)
 
         # 死区
-        if abs(pan_error) <= 2 and abs(tilt_error) <= 2:
+        if abs(pan_error) <= 4 and abs(tilt_error) <= 4:
             print("Reached within deadzone.")
-            uart.write("Reached within deadzone.\n")
+            # uart.write(13)
             return True  # 当达到死区内时，跳出循环并返回True
 
         pan_output = pan_pid.get_pid(pan_error, 1)
@@ -160,7 +169,7 @@ def servo_pid_control(target_x, target_y, target_index):
         # 检查超时 (3秒)
         if time.ticks_diff(time.ticks_ms(), start_time) > 3000:
             print("Failed to reach the target within 3 seconds.")
-            uart.write("Failed to reach the target within 3 seconds.\n")
+            # uart.write(14)
             return False
 
     return True
@@ -183,10 +192,10 @@ while True:
         paused = not paused
         if paused:
             print("Paused")
-            uart.write("Paused\n")
+            # uart.write("Paused\n")
         else:
             print("Resumed")
-            uart.write("Resumed\n")
+            # uart.write("Resumed\n")
 
     # 仅在未暂停状态下运行舵机控制代码
     if not paused:
