@@ -11,8 +11,8 @@ tilt_servo = Servo(2)
 grn_threshold = (94, 100, -6, 21, -6, 8)
 red_threshold = (65, 99, 8, 41, -1, 38)
 
-pan_pid = PID(p=0.042, d=0.001, i=0.03, imax=90) # 脱机运行或者禁用图像传输，使用这个PID
-tilt_pid = PID(p=0.042, d=0.001, i=0.03, imax=90) # 脱机运行或者禁用图像传输，使用这个PID
+pan_pid = PID(p=0.042, d=0.003, i=0.2, imax=90) # 脱机运行或者禁用图像传输，使用这个PID
+tilt_pid = PID(p=0.042, d=0.003, i=0.2, imax=90) # 脱机运行或者禁用图像传输，使用这个PID
 # pan_pid = PID(p=0.1, i=0, imax=90) # 在线调试使用这个PID
 # tilt_pid = PID(p=0.1, i=0, imax=90) # 在线调试使用这个PID
 
@@ -70,17 +70,24 @@ while True:
 
             print("pan_error: ", pan_error)
 
+
             img.draw_rectangle(blob.rect()) # 在图像上画出矩形
             img.draw_cross(cx, cy) # 在图像上画出中心点
 
-            pan_output = pan_pid.get_pid(pan_error, 1)
-            tilt_output = tilt_pid.get_pid(tilt_error, 1)
-            print("pan_output", pan_output)
 
-            panAngle  = int(pan_servo.angle() - pan_output)
-            tiltAngle = int(tilt_servo.angle() + tilt_output)
+            if abs(pan_error) > 5 and abs(tilt_error) > 5:
+                print("Reached within deadzone.")
 
-            # 限幅
-            x_angle, y_angle = limmitAngle(panAngle, tiltAngle)
-            pan_servo.angle(x_angle)
-            tilt_servo.angle(y_angle)
+                pan_output = pan_pid.get_pid(pan_error, 1)
+                tilt_output = tilt_pid.get_pid(tilt_error, 1)
+                print("pan_output", pan_output)
+
+                panAngle  = int(pan_servo.angle() - pan_output)
+                tiltAngle = int(tilt_servo.angle() + tilt_output)
+
+                # 限幅
+                x_angle, y_angle = limmitAngle(panAngle, tiltAngle)
+                pan_servo.angle(x_angle)
+                tilt_servo.angle(y_angle)
+
+

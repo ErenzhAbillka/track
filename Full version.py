@@ -11,24 +11,28 @@ j = 0
 pan_servo = Servo(1)
 tilt_servo = Servo(2)
 
-red_thresholds = [(61, 100, 8, 22, -2, 12),
-                  (0, 100, 12, 34, -28, 36)]
+red_thresholds = [(69, 93, 3, 60, 3, 42),           # LIGHT
+                  (77, 100, 9, 31, -13, 40),        # DRAK
+                  (65, 100, 9, 31, -13, 40),        # DRAK
+                  (27, 100, 9, 31, -13, 40),
+                  (4, 100, 5, 31, 1, 40)]           # BLACK
 
 redPanList = []
 redTiltList = []
 rectanglePanList = []
 rectangleTiltList = []
 
-pan_pid = PID(p=0.028, d=0.012, i=0.2, imax=90)  # Adjust PID parameters
-tilt_pid = PID(p=0.028, d=0.012, i=0.2, imax=90)  # Adjust PID parameters
+pan_pid = PID(p=0.02, d=0.012, i=0.2, imax=90)  # Adjust PID parameters
+tilt_pid = PID(p=0.02, d=0.012, i=0.2, imax=90)  # Adjust PID parameters
 
 rx, ry = None, None  # Initialize coordinates of the red laser point
 
 sensor.reset()  # Initialize the camera sensor
+sensor.set_auto_exposure(False, exposure_us=57200) # Auto exposure is 57200
 sensor.set_contrast(3)
 sensor.set_gainceiling(16)
 sensor.set_pixformat(sensor.RGB565)  # Use RGB565
-sensor.set_framesize(sensor.QVGA)  # Use QVGA resolution
+sensor.set_framesize(sensor.QQVGA)  # Use QVGA resolution
 sensor.set_vflip(False)
 sensor.skip_frames(10)  # Let the new settings take effect
 sensor.set_auto_whitebal(False)  # Turn off auto white balance
@@ -49,10 +53,6 @@ def record(rx, ry):
         for i in range(4):  # Iterate over the range of recorded points
             if i < len(redPanList) and i < len(redTiltList):
                 print("redPanList: {}, redTiltList: {}".format(redPanList[i], redTiltList[i]))
-        # theta_values = [0x2C, 4, redPanList[0], redTiltList[0], redPanList[1], redTiltList[1],
-        #                          redPanList[2], redTiltList[2], redPanList[3], redTiltList[3],0x5B]
-        # data = bytes(theta_values)
-        # uart.write(data)
         j += 1
     elif j >= 5:
         print(":(")
@@ -61,18 +61,13 @@ def record(rx, ry):
 def check_rectangle():
     global img, rectanglePanList, rectangleTiltList
     for r in img.find_rects(threshold=10000):
-        # 绘制矩形轮廓
         img.draw_rectangle(r.rect(), color=(255, 0, 0))
-
-        # 获取并绘制矩形角点
         corners = r.corners()
         corners = sorted(corners, key=lambda c: (c[1], c[0]))  # 按 y 坐标排序，如果 y 坐标相同按 x 坐标排序
 
-        # 左上角和右上角
         if corners[0][0] > corners[1][0]:
             corners[0], corners[1] = corners[1], corners[0]
 
-        # 左下角和右下角
         if corners[2][0] > corners[3][0]:
             corners[2], corners[3] = corners[3], corners[2]
 
@@ -81,10 +76,6 @@ def check_rectangle():
         for h in range(4):
             rectangleTiltList.append(corners[h][1])
             print("rectanglePanList: {}, rectangleTiltList: {}".format(rectanglePanList[h], rectangleTiltList[h]))
-        # theta_values = [0x2C, 4, rectanglePanList[0], rectangleTiltList[0], rectanglePanList[1], rectangleTiltList[1],
-        #                          rectanglePanList[2], rectangleTiltList[2], rectanglePanList[3], rectangleTiltList[3],0x5B]
-        # data = bytes(theta_values)
-        # uart.write(data)
 
 
 def find_max(blobs):
@@ -102,8 +93,8 @@ def limit_angle(pan_angle, tilt_angle):
         pan_angle = 15
     if pan_angle < -15:
         pan_angle = -15
-    if tilt_angle > 15:
-        tilt_angle = 15
+    if tilt_angle > 14:
+        tilt_angle = 14
     if tilt_angle < -15:
         tilt_angle = -15
     return pan_angle, tilt_angle
@@ -125,16 +116,19 @@ def update_laser_position():
 
 
 def servo_pid_control(target_x, target_y, target_index):
-    global rx, ry
+    global rx, ry, paused
     start_time = time.ticks_ms()  # 记录开始时间
     print("Moving to target:", target_index)
     uart.write("Moving to target: {}\n".format(target_index))
 
     while True:
+        if paused:  # 检查暂停状态
+            print("Paused, stopping servo control.")
+            return False
+
         if not update_laser_position():
             if time.ticks_diff(time.ticks_ms(), start_time) > 3000:
                 print("Failed to reach the target within 3 seconds.")
-                # uart.write(14)
                 return False
             continue
 
@@ -144,10 +138,8 @@ def servo_pid_control(target_x, target_y, target_index):
         print("pan_error: ", pan_error)
         print("tilt_error: ", tilt_error)
 
-        # 死区
-        if abs(pan_error) <= 4 and abs(tilt_error) <= 4:
+        if abs(pan_error) <= 5 and abs(tilt_error) <= 5:
             print("Reached within deadzone.")
-            # uart.write(13)
             return True  # 当达到死区内时，跳出循环并返回True
 
         pan_output = pan_pid.get_pid(pan_error, 1)
@@ -158,7 +150,6 @@ def servo_pid_control(target_x, target_y, target_index):
         pan_angle = int(pan_servo.angle() - pan_output)
         tilt_angle = int(tilt_servo.angle() + tilt_output)
 
-        # 限制角度
         x_angle, y_angle = limit_angle(pan_angle, tilt_angle)
         pan_servo.angle(x_angle)
         tilt_servo.angle(y_angle)
@@ -166,10 +157,8 @@ def servo_pid_control(target_x, target_y, target_index):
         print("Servo angles: pan = {}, tilt = {}".format(x_angle, y_angle))
         print("\n ")
 
-        # 检查超时 (3秒)
         if time.ticks_diff(time.ticks_ms(), start_time) > 3000:
             print("Failed to reach the target within 3 seconds.")
-            # uart.write(14)
             return False
 
     return True
@@ -187,17 +176,13 @@ while True:
     if Signal == 8:
         check_rectangle()
 
-    # 如果接收到字符 5，切换暂停状态
     if Signal == 5:
         paused = not paused
         if paused:
             print("Paused")
-            # uart.write("Paused\n")
         else:
             print("Resumed")
-            # uart.write("Resumed\n")
 
-    # 仅在未暂停状态下运行舵机控制代码
     if not paused:
         red_blobs = img.find_blobs(red_thresholds)
         if red_blobs:
@@ -205,17 +190,15 @@ while True:
             if red_blob:
                 rx = int(red_blob.cx())
                 ry = int(red_blob.cy())
-                # print("Detected red laser at: ", rx, ry)
 
-                # Sequentially align with the preset red laser point positions
                 if Signal == 7:
                     for i in range(len(redPanList)):
                         target_x = redPanList[i]
                         target_y = redTiltList[i]
                         if not servo_pid_control(target_x, target_y, i):
                             break  # Exit the main loop if timeout occurs
+                        time.sleep_ms(100)
                         print("loop {} is over".format(i))
-                    # back to orri
                     target_x = redPanList[0]
                     target_y = redTiltList[0]
                     if not servo_pid_control(target_x, target_y, 0):
@@ -229,12 +212,8 @@ while True:
                         if not servo_pid_control(target_x, target_y, i):
                             break  # Exit the main loop if timeout occurs
                         print("loop {} is over".format(i))
-                    # back to orri
                     target_x = rectanglePanList[0]
                     target_y = rectangleTiltList[0]
                     if not servo_pid_control(target_x, target_y, 0):
                         break  # Exit the main loop if timeout occurs
                     print("Mission accomplished")
-
-    #    else:
-    #        print("No red blobs detected.")
